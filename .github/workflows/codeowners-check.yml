@@ -1,0 +1,113 @@
+# This is a basic workflow to help you get started with Actions
+
+name: CODEOWNERS Check
+on:
+  workflow_call:
+
+jobs:
+  owner-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+      
+      - uses: actions/checkout@v3
+        with:
+          repository: boxboat/reusable-workflows
+          ref: main
+          token: ${{ secrets.TOKEN }}
+          path: admin
+
+      - name: CODEOWNERS Check
+        run: |
+          exit_code=0
+          touch error1.log
+          touch error2.log
+
+          files=$(git diff --name-only origin/${GITHUB_HEAD_REF} origin/${GITHUB_BASE_REF})
+          sed 's/\s*#.*$//' admin/meta/CODEOWNERS | sed '/^$/d' > CODEOWNERS
+          patterns=$(cat CODEOWNERS | awk '{print $1'})
+
+          while read -r literal; do
+            pattern=$(echo "$literal" | sed 's/\./\\./')
+            if [ "${pattern:0:2}" = '**' ]; then
+              pattern=$(echo "$pattern" | sed 's/\*\*/\.\*/')
+            else
+              pattern=$(echo "$pattern" | sed 's/\*/[^\/]*/')
+            fi
+            echo "$pattern" >> patterns.txt
+            if $(echo "$files" | grep -q -E "$pattern"); then 
+              echo \
+                $(echo \
+                  $(grep -F "$literal" CODEOWNERS \
+                    | cut -f 2- -d ' ' \
+                    | sed 's/@[^\/]*\///g' \
+                    | tr "[:space:]" "|" \
+                    | sed 's/|$//'\
+                  ); \
+                  echo " "; \
+                  echo "$literal" | sed "s/\*/'*'/g"; \
+                  echo "$files" \
+                    | grep -n -E "$pattern" \
+                    | sed 's/[0-9]*:/|/' \
+                    | tr -d "[:space:]" \
+                    | sed 's/^|//g'\
+                ) \
+              >> debug.txt;
+            fi 
+          done <<< "$patterns"
+
+          sed -i "s/'\*'/*/g" debug.txt
+
+          echo "$files" \
+            | grep -v -E \
+              $(cat patterns.txt \
+                | awk '{print "("$1")"}' \
+                | tr "\n" "|" \
+                | sed 's/|$//'\
+              ) ||:\
+          >> error1.log
+
+          teams=$(cat debug.txt \
+            | awk '{print $1}' \
+            | tr "|" "\n" \
+            | sort \
+            | uniq)
+
+          while read -r team; do
+            member=$(curl -s \
+              -H "Accept: application/vnd.github+json" \
+              -H "Authorization: Bearer ${{ secrets.TOKEN }}" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              "https://api.github.com/orgs/${GITHUB_REPOSITORY_OWNER}/teams/${team}/memberships/${GITHUB_ACTOR}" \
+              | jq -r '.state')
+            if [ "$member" != "null" ]; then
+              echo "$team" >> member.txt
+            fi
+          done <<< "$teams"
+
+          while read -r member; do
+              grep -v "$member" debug.txt ||: >> nonmember.txt
+          done < member.txt
+
+          cat nonmember.txt | sort | uniq >> error2.log
+
+          if [ $(cat error1.log | wc -l) -gt 0 ]; then
+            exit_code=1
+            printf "Debug Info\n------\n"
+            cat debug.txt
+            printf "\nNo CODEOWNERS coverage\n------\n"
+            cat error1.log
+          elif [ $(cat error2.log | wc -l ) -gt 0 ]; then
+            exit_code=1
+            printf "Debug Info\n------\n"
+            cat debug.txt
+            printf "\nUser does not belong to team that owns these files\n------\n"
+            cat error2.log
+          else
+            printf "Debug Info\n------\n"
+            cat debug.txt
+          fi
+
+          exit $exit_code
