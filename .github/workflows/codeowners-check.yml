@@ -24,6 +24,7 @@ jobs:
           exit_code=0
           touch error1.log
           touch error2.log
+          touch member.txt
 
           files=$(git diff --name-only origin/${GITHUB_HEAD_REF} origin/${GITHUB_BASE_REF})
           sed 's/\s*#.*$//' admin/meta/CODEOWNERS | sed '/^$/d' > CODEOWNERS
