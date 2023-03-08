@@ -5,4 +5,4 @@ folder2 @boxboat/dank-team
 *3 @boxboat/dank-team
 newfile @boxboat/dank-team
 .github @boxboat/dank-team
-**/test @boxboat/fishbot-team
+**/test @boxboat/fishbot-team @boxboat/dank-team
